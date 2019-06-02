@@ -1198,6 +1198,11 @@ struct mqtt_client {
     void (*enable_sendready_event)(struct mqtt_client*, int enabled);
 
     /**
+     * @brief A pointer to some user-defined state.
+     */
+    void *userctx;
+
+    /**
      * @brief The buffer where ingress data is temporarily stored.
      */
     struct {
