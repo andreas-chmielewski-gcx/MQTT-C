@@ -177,7 +177,7 @@ struct mqtt_fixed_header {
     MQTT_ERROR(MQTT_ERROR_MALFORMED_RESPONSE)            \
     MQTT_ERROR(MQTT_ERROR_UNSUBSCRIBE_TOO_MANY_TOPICS)   \
     MQTT_ERROR(MQTT_ERROR_RESPONSE_INVALID_CONTROL_TYPE) \
-    MQTT_ERROR(MQTT_ERROR_CONNECT_NOT_CALLED)          \
+    MQTT_ERROR(MQTT_ERROR_CONNECT_NOT_CALLED)            \
     MQTT_ERROR(MQTT_ERROR_SEND_BUFFER_IS_FULL)           \
     MQTT_ERROR(MQTT_ERROR_SOCKET_ERROR)                  \
     MQTT_ERROR(MQTT_ERROR_MALFORMED_REQUEST)             \
@@ -189,7 +189,9 @@ struct mqtt_fixed_header {
     MQTT_ERROR(MQTT_ERROR_CONNECTION_CLOSED)             \
     MQTT_ERROR(MQTT_ERROR_INITIAL_RECONNECT)             \
     MQTT_ERROR(MQTT_ERROR_INVALID_REMAINING_LENGTH)      \
-    MQTT_ERROR(MQTT_ERROR_IMPLEMENTATION_BUG)
+    MQTT_ERROR(MQTT_ERROR_IMPLEMENTATION_BUG)            \
+    MQTT_ERROR(MQTT_ERROR_INIT)                          \
+    MQTT_ERROR(MQTT_ERROR_FATAL)
 
 /* todo: add more connection refused errors */
 
@@ -1151,51 +1153,19 @@ struct mqtt_client {
     void* publish_response_callback_state;
 
     /**
-     * @brief A user-specified callback, triggered on each \ref mqtt_sync, allowing
-     *        the user to perform state inspections (and custom socket error detection)
-     *        on the client.
-     * 
-     * This callback is triggered on each call to \ref mqtt_sync. If it returns MQTT_OK
-     * then \ref mqtt_sync will continue normally (performing reads and writes). If it
-     * returns an error then \ref mqtt_sync will not call reads and writes.
-     * 
-     * This callback can be used to perform custom error detection, namely platform
-     * specific socket error detection, and force the client into an error state.
-     * 
-     * This member is always initialized to NULL but it can be manually set at any 
-     * time.
-     */
-    enum MQTTErrors (*inspector_callback)(struct mqtt_client*);
-
-    /**
      * @brief A callback that is called whenever the client is in an error state.
      * 
      * This callback is responsible for: application level error handling, closing
      * previous sockets, and reestabilishing the connection to the broker and 
      * session configurations (i.e. subscriptions).  
      */
-    void (*reconnect_callback)(struct mqtt_client*, void**);
+    enum MQTTErrors (*reconnect_callback)(struct mqtt_client*, void**);
 
     /**
      * @brief A pointer to some state. A pointer to this member is passed to 
      *        \ref mqtt_client.reconnect_callback.
      */
     void* reconnect_state;
-
-    /**
-     * @brief A callback that is called to set the ping timer.
-     */
-    void (*set_ping_timer)(struct mqtt_client*, mqtt_pal_time_t t);
-
-    /**
-     * @brief A callback that is called to set the ack timer.
-     */
-    void (*set_ack_timeout)(struct mqtt_client*, mqtt_pal_time_t t);
-
-    /**
-     * @brief A callback that is called to configure sendready notifications.
-     */
-    void (*enable_sendready_event)(struct mqtt_client*, int enabled);
 
     /**
      * @brief A pointer to some user-defined state.
@@ -1232,6 +1202,16 @@ struct mqtt_client {
 
     /** @brief The number of data already sent using a partial write of a message */
     size_t msg_sending_offset;
+
+    mqtt_pal_ev_t *ev;
+    mqtt_pal_io_t io_sock;
+    mqtt_pal_timer_t timer_ping;
+    mqtt_pal_timer_t timer_ack;
+
+    size_t reconnect_timeout;
+    mqtt_pal_timer_t timer_reconnect;
+
+    void (*fatal_error_callback)(struct mqtt_client*);
 };
 
 /**
@@ -1265,113 +1245,6 @@ ssize_t __mqtt_send(struct mqtt_client *client);
  * @returns MQTT_OK upon success, an \ref MQTTErrors otherwise. 
  */
 ssize_t __mqtt_recv(struct mqtt_client *client);
-
-/**
- * @brief Call this when the ping timer has expired.
- * @ingroup details
- * 
- * @param client The MQTT client.
- * 
- * @returns MQTT_OK upon success, an \ref MQTTErrors otherwise. 
- */
-enum MQTTErrors mqtt_notify_pingtimer(struct mqtt_client *client);
-
-/**
- * @brief Call this when the ack timer has expired.
- * @ingroup details
- * 
- * @param client The MQTT client.
- * 
- * @returns MQTT_OK upon success, an \ref MQTTErrors otherwise. 
- */
-enum MQTTErrors mqtt_notify_acktimer(struct mqtt_client *client);
-
-/**
- * @brief Call this when the there's data available.
- * @ingroup details
- * 
- * @param client The MQTT client.
- * 
- * @returns MQTT_OK upon success, an \ref MQTTErrors otherwise. 
- */
-enum MQTTErrors mqtt_notify_recv(struct mqtt_client *client);
-
-/**
- * @brief Call this when the there's free space in the send-buffer.
- * @ingroup details
- * 
- * @param client The MQTT client.
- * 
- * @returns MQTT_OK upon success, an \ref MQTTErrors otherwise. 
- */
-enum MQTTErrors mqtt_notify_send(struct mqtt_client *client);
-
-/**
- * @brief Function that does the actual sending and receiving of 
- *        traffic from the network.
- * @ingroup api
- * 
- * All the other functions in the @ref api simply stage messages for
- * being sent to the broker. This function does the actual sending of
- * those messages. Additionally this function receives traffic (responses and 
- * acknowledgements) from the broker and responds to that traffic accordingly.
- * Lastly this function also calls the \c publish_response_callback when
- * any \c MQTT_CONTROL_PUBLISH messages are received.
- * 
- * @pre mqtt_init must have been called.
- * 
- * @param[in,out] client The MQTT client.
- * 
- * @attention It is the responsibility of the application programmer to 
- *            call this function periodically. All functions in the @ref api are
- *            thread-safe so it is perfectly reasonable to have a thread dedicated
- *            to calling this function every 200 ms or so. MQTT-C can be used in single
- *            threaded application though by simply calling this functino periodically 
- *            inside your main thread. See @ref simple_publisher.c and @ref simple_subscriber.c
- *            for examples (specifically the \c client_refresher functions).
- * 
- * @returns MQTT_OK upon success, an \ref MQTTErrors otherwise. 
- */
-enum MQTTErrors mqtt_sync(struct mqtt_client *client);
-
-/**
- * @brief Initializes an MQTT client.
- * @ingroup api
- * 
- * This function \em must be called before any other API function calls.
- * 
- * @pre None.
- * 
- * @param[out] client The MQTT client.
- * @param[in] sockfd The socket file descriptor (or equivalent socket handle, e.g. BIO pointer 
- *            for OpenSSL sockets) connected to the MQTT broker.
- * @param[in] sendbuf A buffer that will be used for sending messages to the broker.
- * @param[in] sendbufsz The size of \p sendbuf in bytes.
- * @param[in] recvbuf A buffer that will be used for receiving messages from the broker.
- * @param[in] recvbufsz The size of \p recvbuf in bytes.
- * @param[in] publish_response_callback The callback to call whenever application messages
- *            are received from the broker. 
- * 
- * @post mqtt_connect must be called.
- * 
- * @note \p sockfd is a non-blocking TCP connection.
- * @note If \p sendbuf fills up completely during runtime a \c MQTT_ERROR_SEND_BUFFER_IS_FULL
- *       error will be set. Similarly if \p recvbuf is ever to small to receive a message from
- *       the broker an MQTT_ERROR_RECV_BUFFER_TOO_SMALL error will be set.
- * @note A pointer to \ref mqtt_client.publish_response_callback_state is always passed as the 
- *       \c state argument to \p publish_response_callback. Note that the second argument is 
- *       the mqtt_response_publish that was received from the broker.
- * 
- * @attention Only initialize an MQTT client once (i.e. don't call \ref mqtt_init or 
- *            \ref mqtt_init_reconnect more than once per client).
- * 
- * @returns \c MQTT_OK upon success, an \ref MQTTErrors otherwise.
- */
-enum MQTTErrors mqtt_init(struct mqtt_client *client,
-                          mqtt_pal_socket_handle sockfd,
-                          uint8_t *sendbuf, size_t sendbufsz,
-                          uint8_t *recvbuf, size_t recvbufsz,
-                          void (*publish_response_callback)(void** state, struct mqtt_response_publish *publish));
 
 /**
  * @brief Initializes an MQTT client and enables automatic reconnections.
@@ -1417,10 +1290,11 @@ enum MQTTErrors mqtt_init(struct mqtt_client *client,
  *            \ref mqtt_init_reconnect more than once per client).
  *
  */
-void mqtt_init_reconnect(struct mqtt_client *client,
-                         void (*reconnect_callback)(struct mqtt_client *client, void** state),
+enum MQTTErrors mqtt_init_reconnect(struct mqtt_client *client, mqtt_pal_ev_t *ev,
+                         enum MQTTErrors (*reconnect_callback)(struct mqtt_client *client, void** state),
                          void *reconnect_state,
-                         void (*publish_response_callback)(void** state, struct mqtt_response_publish *publish));
+                         void (*publish_response_callback)(void** state, struct mqtt_response_publish *publish),
+                         void (*fatal_error_callback)(struct mqtt_client *));
 
 /**
  * @brief Safely assign/reassign a socket and buffers to an new/existing client.
@@ -1444,7 +1318,7 @@ void mqtt_init_reconnect(struct mqtt_client *client,
  * @attention This function should be used in conjunction with clients that have been 
  *            initialzed with \ref mqtt_init_reconnect.  
  */
-void mqtt_reinit(struct mqtt_client* client,
+enum MQTTErrors mqtt_reinit(struct mqtt_client* client,
                  mqtt_pal_socket_handle socketfd,
                  uint8_t *sendbuf, size_t sendbufsz,
                  uint8_t *recvbuf, size_t recvbufsz);
@@ -1620,5 +1494,7 @@ enum MQTTErrors __mqtt_ping(struct mqtt_client *client);
  * @returns \c MQTT_OK upon success, an \ref MQTTErrors otherwise.
  */
 enum MQTTErrors mqtt_disconnect(struct mqtt_client *client);
+
+enum MQTTErrors mqtt_start_reconnect(struct mqtt_client *client);
 
 #endif
