@@ -77,8 +77,15 @@ enum MQTTErrors __mqtt_start_reconnect(struct mqtt_client *client) {
 
     err = client->reconnect_callback(client, &client->reconnect_state);
     if (err != MQTT_OK) {
-        __mqtt_fatal_error(client, err);
-        return MQTT_ERROR_FATAL;
+        /* do a reconnect after the usual waiting time */
+        rc = mqtt_pal_timer_set(&client->timer_reconnect, client->reconnect_timeout, 0);
+        if (rc) {
+            __mqtt_fatal_error(client, MQTT_ERROR_INIT);
+            return MQTT_ERROR_FATAL;
+        }
+
+        /* return success here because not being able to connect isn't fatal */
+        return MQTT_OK;
     }
 
     return MQTT_OK;
