@@ -870,7 +870,7 @@ do_send:
             } else if (inspected == 1) {
                 msg->state = MQTT_QUEUED_AWAITING_ACK;
                 /*set DUP flag for subsequent sends */ 
-                msg->start[1] |= MQTT_PUBLISH_DUP;
+                msg->start[0] |= MQTT_PUBLISH_DUP;
             } else {
                 msg->state = MQTT_QUEUED_AWAITING_ACK;
             }
