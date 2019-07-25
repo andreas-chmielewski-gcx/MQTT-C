@@ -423,6 +423,7 @@ enum MQTTErrors mqtt_reinit(struct mqtt_client* client,
 
 enum MQTTErrors mqtt_connect(struct mqtt_client *client,
                      const char* client_id,
+                     size_t client_id_size,
                      const char* will_topic,
                      const void* will_message,
                      size_t will_message_size,
@@ -455,7 +456,7 @@ enum MQTTErrors mqtt_connect(struct mqtt_client *client,
     MQTT_CLIENT_TRY_PACK(rv, msg, client, 
         mqtt_pack_connection_request(
             client->mq.curr, client->mq.curr_sz,
-            client_id, will_topic, will_message, 
+            client_id, client_id_size, will_topic, will_message,
             will_message_size,user_name, password, 
             connect_flags, keep_alive
         ), 
@@ -1381,6 +1382,7 @@ ssize_t mqtt_pack_fixed_header(uint8_t *buf, size_t bufsz, const struct mqtt_fix
 /* CONNECT */
 ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz, 
                                      const char* client_id,
+                                     size_t client_id_size,
                                      const char* will_topic,
                                      const void* will_message,
                                      size_t will_message_size,
@@ -1407,7 +1409,7 @@ ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz,
         return MQTT_ERROR_CONNECT_NULL_CLIENT_ID;
     } else {
         /* mqtt_string length is strlen + 2 */
-        remaining_length += __mqtt_packed_cstrlen(client_id);
+        remaining_length += __mqtt_packed_cstrlen_raw(client_id, client_id_size);
     }
     
     if (will_topic != NULL) {
@@ -1480,7 +1482,7 @@ ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz,
     buf += __mqtt_pack_uint16(buf, keep_alive);
 
     /* pack the payload */
-    buf += __mqtt_pack_str(buf, client_id);
+    buf += __mqtt_pack_str_raw(buf, client_id, client_id_size);
     if (connect_flags & MQTT_CONNECT_WILL_FLAG) {
         buf += __mqtt_pack_str(buf, will_topic);
         buf += __mqtt_pack_uint16(buf, will_message_size);
@@ -2028,8 +2030,8 @@ uint16_t __mqtt_unpack_uint16(const uint8_t *buf)
   return MQTT_PAL_NTOHS(integer_htons);
 }
 
-ssize_t __mqtt_pack_str(uint8_t *buf, const char* str) {
-    uint16_t length = strlen(str);
+ssize_t __mqtt_pack_str_raw(uint8_t *buf, const char* str, size_t _length) {
+    uint16_t length = _length;
     int i = 0;
      /* pack string length */
     buf += __mqtt_pack_uint16(buf, length);
@@ -2041,6 +2043,10 @@ ssize_t __mqtt_pack_str(uint8_t *buf, const char* str) {
     
     /* return number of bytes consumed */
     return length + 2;
+}
+
+ssize_t __mqtt_pack_str(uint8_t *buf, const char* str) {
+    return __mqtt_pack_str_raw(buf, str, strlen(str));
 }
 
 static const char *MQTT_ERRORS_STR[] = {

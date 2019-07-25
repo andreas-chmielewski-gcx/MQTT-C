@@ -266,9 +266,12 @@ uint16_t __mqtt_unpack_uint16(const uint8_t *buf);
  * @returns strlen(str) + 2
 */
 ssize_t __mqtt_pack_str(uint8_t *buf, const char* str);
+ssize_t __mqtt_pack_str_raw(uint8_t *buf, const char* str, size_t len);
 
 /** @brief A macro to get the MQTT string length from a c-string. */
 #define __mqtt_packed_cstrlen(x) (2 + strlen(x))
+
+#define __mqtt_packed_cstrlen_raw(x, sz) (2 + sz)
 
 /* RESPONSES */
 
@@ -708,6 +711,7 @@ enum MQTTConnectFlags {
  */
 ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz, 
                                      const char* client_id,
+                                     size_t client_id_size,
                                      const char* will_topic,
                                      const void* will_message,
                                      size_t will_message_size,
@@ -1351,6 +1355,7 @@ enum MQTTErrors mqtt_reinit(struct mqtt_client* client,
  */
 enum MQTTErrors mqtt_connect(struct mqtt_client *client,
                              const char* client_id,
+                             size_t client_id_size,
                              const char* will_topic,
                              const void* will_message,
                              size_t will_message_size,
