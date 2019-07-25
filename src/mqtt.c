@@ -128,10 +128,17 @@ void __mqtt_set_error(struct mqtt_client *client, enum MQTTErrors error) {
     }
 }
 
-
 mqtt_pal_time_t __mqtt_calc_keepalive_timeout(struct mqtt_client *client) {
     mqtt_pal_time_t now = MQTT_PAL_TIME();
-    return (client->time_of_last_send + (mqtt_pal_time_t)((float)(client->keep_alive) * 0.75)) - now;
+    mqtt_pal_time_t t = client->time_of_last_send + (mqtt_pal_time_t)((float)(client->keep_alive) * 0.75);
+
+    if (t <= now) {
+        /* the timeout already happened, tun the callback ASAP */
+        return 1;
+    }
+
+    /* we know the time is in the future, and the pal expects relative times */
+    return t - now;
 }
 
 enum MQTTErrors __mqtt_update_ping_timer(struct mqtt_client *client) {
@@ -150,6 +157,7 @@ enum MQTTErrors __mqtt_update_ack_timer(struct mqtt_client *client) {
     int i = 0;
     ssize_t len = mqtt_mq_length(&client->mq);
     mqtt_pal_time_t t = 0;
+    mqtt_pal_time_t now = MQTT_PAL_TIME();
     int rc;
 
     /* loop through all messages in the queue */
@@ -167,7 +175,20 @@ enum MQTTErrors __mqtt_update_ack_timer(struct mqtt_client *client) {
         }
     }
 
-    rc = mqtt_pal_timer_set(&client->timer_ack, t ? (t + client->response_timeout) - MQTT_PAL_TIME() : 0, 0);
+    t += client->response_timeout;
+
+    if (t != 0) {
+        if (t <= now) {
+            /* the timeout already happened, tun the callback ASAP */
+            t = 1;
+        }
+        else {
+            /* we know the time is in the future, and the pal expects relative times */
+            t -= now;
+        }
+    }
+
+    rc = mqtt_pal_timer_set(&client->timer_ack, t, 0);
     if (rc) {
         __mqtt_fatal_error(client, MQTT_ERROR_INIT);
         return MQTT_ERROR_FATAL;
