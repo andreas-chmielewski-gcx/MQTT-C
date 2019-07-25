@@ -38,7 +38,7 @@ static enum MQTTErrors __mqtt_try_reset_callbacks(struct mqtt_client *client) {
     rc = mqtt_pal_timer_set(&client->timer_reconnect, 0, 0);
     if (rc) err = MQTT_ERROR_INIT;
 
-    rc = mqtt_pal_io_set(&client->io_sock, -1, 0);
+    rc = mqtt_pal_io_set(&client->io_sock, MQTT_PAL_INVALID_SOCKET_HANDLE, 0);
     if (rc) err = MQTT_ERROR_INIT;
 
     return err;
