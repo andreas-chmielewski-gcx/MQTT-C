@@ -24,6 +24,9 @@ SOFTWARE.
 
 #include <mqtt.h>
 
+#define CROSSLOG_TAG "mqttc"
+#include <crosslog.h>
+
 static enum MQTTErrors __mqtt_try_reset_callbacks(struct mqtt_client *client) {
     int rc;
     enum MQTTErrors err = MQTT_OK;
@@ -146,6 +149,7 @@ enum MQTTErrors __mqtt_update_ping_timer(struct mqtt_client *client) {
 
     rc = mqtt_pal_timer_set(&client->timer_ping, client->time_of_last_send ? __mqtt_calc_keepalive_timeout(client) : 0, 0);
     if (rc) {
+        CROSSLOGE("ping timer failed");
         __mqtt_fatal_error(client, MQTT_ERROR_INIT);
         return MQTT_ERROR_FATAL;
     }
@@ -190,6 +194,7 @@ enum MQTTErrors __mqtt_update_ack_timer(struct mqtt_client *client) {
 
     rc = mqtt_pal_timer_set(&client->timer_ack, t, 0);
     if (rc) {
+        CROSSLOGE("ack timer failed");
         __mqtt_fatal_error(client, MQTT_ERROR_INIT);
         return MQTT_ERROR_FATAL;
     }
@@ -389,6 +394,7 @@ enum MQTTErrors mqtt_reinit(struct mqtt_client* client,
     }                                                               \
     tmp = pack_call;                                                \
     if (tmp < 0) {                                                  \
+        CROSSLOGE("pack: pack_call1: %d", pack_call);               \
         __mqtt_set_error(client, tmp);                              \
         if (release) MQTT_PAL_MUTEX_UNLOCK(&client->mutex);         \
         return tmp;                                                 \
@@ -396,10 +402,12 @@ enum MQTTErrors mqtt_reinit(struct mqtt_client* client,
         mqtt_mq_clean(&client->mq);                                 \
         tmp = pack_call;                                            \
         if (tmp < 0) {                                              \
+            CROSSLOGE("pack: pack_call2: %d", pack_call);           \
             __mqtt_set_error(client, tmp);                          \
             if (release) MQTT_PAL_MUTEX_UNLOCK(&client->mutex);     \
             return tmp;                                             \
         } else if(tmp == 0) {                                       \
+            CROSSLOGE("pack:MQTT_ERROR_SEND_BUFFER_IS_FULL");       \
             __mqtt_set_error(client, MQTT_ERROR_SEND_BUFFER_IS_FULL);\
             if (release) MQTT_PAL_MUTEX_UNLOCK(&client->mutex);     \
             return MQTT_ERROR_SEND_BUFFER_IS_FULL;                  \
@@ -439,6 +447,7 @@ enum MQTTErrors mqtt_connect(struct mqtt_client *client,
     }
 
     if (client->error == MQTT_ERROR_CONNECT_NOT_CALLED) {
+        CROSSLOGE("MQTT_ERROR_CONNECT_NOT_CALLED");
         __mqtt_set_error(client, MQTT_OK);
     }
     
@@ -734,6 +743,7 @@ ssize_t __mqtt_send(struct mqtt_client *client)
 
         /* not found */
         if (i == len) {
+            CROSSLOGE("MQTT_ERROR_IMPLEMENTATION_BUG");
             __mqtt_set_error(client, MQTT_ERROR_IMPLEMENTATION_BUG);
             MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
             return client->error;
@@ -782,6 +792,7 @@ do_send:
         {
           ssize_t tmp = __mqtt_do_send(client, msg->start + sendoff, msg->size - sendoff, 0);
           if (tmp < 0) {
+            CROSSLOGE("__mqtt_do_send: %s(%zd)", mqtt_error_str(tmp), tmp);
             __mqtt_set_error(client, tmp);
             if (sendoff) {
               tmp = __mqtt_update_io_events(client, 0);
@@ -865,6 +876,7 @@ do_send:
             msg->state = MQTT_QUEUED_AWAITING_ACK;
             break;
         default:
+            CROSSLOG_ERRNO("unsupported control pkg: %d", msg->control_type);
             __mqtt_set_error(client, MQTT_ERROR_MALFORMED_REQUEST);
             MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
             return MQTT_ERROR_MALFORMED_REQUEST;
@@ -908,6 +920,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
         rv = mqtt_pal_recv(client->socketfd, client->recv_buffer.curr, client->recv_buffer.curr_sz, 0);
         if (rv < 0) {
             /* an error occurred */
+            CROSSLOGE("mqtt_pal_recv: %s(%zd)", mqtt_error_str(rv), rv);
             __mqtt_set_error(client, rv);
             MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
             return rv;
@@ -920,12 +933,14 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
         consumed = mqtt_unpack_response(&response, client->recv_buffer.mem_start, client->recv_buffer.curr - client->recv_buffer.mem_start);
 
         if (consumed < 0) {
+            CROSSLOGE("mqtt_unpack_response: %zd", consumed);
             __mqtt_set_error(client, consumed);
             MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
             return consumed;
         } else if (consumed == 0) {
             /* if curr_sz is 0 then the buffer is too small to ever fit the message */
             if (client->recv_buffer.curr_sz == 0) {
+                CROSSLOGE("buffer too small for response msg");
                 __mqtt_set_error(client, MQTT_ERROR_RECV_BUFFER_TOO_SMALL);
                 MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                 return MQTT_ERROR_RECV_BUFFER_TOO_SMALL;
@@ -971,6 +986,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated CONNECT */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_CONNECT, NULL);
                 if (msg == NULL) {
+                    CROSSLOGE("MQTT_CONTROL_CONNECT not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -980,6 +996,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->typical_response_time = (double) (MQTT_PAL_TIME() - msg->time_sent);
                 /* check that connection was successful */
                 if (response.decoded.connack.return_code != MQTT_CONNACK_ACCEPTED) {
+                    CROSSLOGE("CONNACK: %d", response.decoded.connack.return_code);
                     __mqtt_set_error(client, MQTT_ERROR_CONNECTION_REFUSED);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_CONNECTION_REFUSED;
@@ -990,6 +1007,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 if (response.decoded.publish.qos_level == 1) {
                     rv = __mqtt_puback(client, response.decoded.publish.packet_id);
                     if (rv != MQTT_OK) {
+                        CROSSLOGE("__mqtt_puback: %d", rv);
                         __mqtt_set_error(client, rv);
                         MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                         return rv;
@@ -1002,6 +1020,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
 
                     rv = __mqtt_pubrec(client, response.decoded.publish.packet_id);
                     if (rv != MQTT_OK) {
+                        CROSSLOGE("__mqtt_pubrec: %d", rv);
                         __mqtt_set_error(client, rv);
                         MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                         return rv;
@@ -1014,6 +1033,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated PUBLISH */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBLISH, &response.decoded.puback.packet_id);
                 if (msg == NULL) {
+                    CROSSLOGE("PUBACK msg not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1030,6 +1050,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated PUBLISH */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBLISH, &response.decoded.pubrec.packet_id);
                 if (msg == NULL) {
+                    CROSSLOGE("PUBLISH msg not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1040,6 +1061,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* stage PUBREL */
                 rv = __mqtt_pubrel(client, response.decoded.pubrec.packet_id);
                 if (rv != MQTT_OK) {
+                    CROSSLOGE("__mqtt_pubrel: %d", rv);
                     __mqtt_set_error(client, rv);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return rv;
@@ -1049,6 +1071,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated PUBREC */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBREC, &response.decoded.pubrel.packet_id);
                 if (msg == NULL) {
+                    CROSSLOGE("PUBREL msg failed");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1059,6 +1082,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* stage PUBCOMP */
                 rv = __mqtt_pubcomp(client, response.decoded.pubrec.packet_id);
                 if (rv != MQTT_OK) {
+                    CROSSLOGE("__mqtt_pubcomp: %d", rv);
                     __mqtt_set_error(client, rv);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return rv;
@@ -1068,6 +1092,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated PUBREL */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBREL, &response.decoded.pubcomp.packet_id);
                 if (msg == NULL) {
+                    CROSSLOGE("MQTT_CONTROL_PUBREL msg not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1080,6 +1105,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated SUBSCRIBE */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_SUBSCRIBE, &response.decoded.suback.packet_id);
                 if (msg == NULL) {
+                    CROSSLOGE("MQTT_CONTROL_SUBSCRIBE msg not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1089,6 +1115,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->typical_response_time = 0.875 * (client->typical_response_time) + 0.125 * (double) (MQTT_PAL_TIME() - msg->time_sent);
                 /* check that subscription was successful (not currently only one subscribe at a time) */
                 if (response.decoded.suback.return_codes[0] == MQTT_SUBACK_FAILURE) {
+                    CROSSLOGE("MQTT_CONTROL_SUBACK rsp: %d", response.decoded.suback.return_codes[0]);
                     __mqtt_set_error(client, MQTT_ERROR_SUBSCRIBE_FAILED);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_SUBSCRIBE_FAILED;
@@ -1098,6 +1125,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated UNSUBSCRIBE */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_UNSUBSCRIBE, &response.decoded.unsuback.packet_id);
                 if (msg == NULL) {
+                    CROSSLOGE("MQTT_CONTROL_UNSUBACK msg not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1110,6 +1138,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 /* release associated PINGREQ */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PINGREQ, NULL);
                 if (msg == NULL) {
+                    CROSSLOGE("MQTT_CONTROL_PINGRESP msg not found");
                     __mqtt_set_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
@@ -1119,6 +1148,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->typical_response_time = 0.875 * (client->typical_response_time) + 0.125 * (double) (MQTT_PAL_TIME() - msg->time_sent);
                 break;
             default:
+                CROSSLOGE("unsupported rsp control type: %d", response.fixed_header.control_type);
                 __mqtt_set_error(client, MQTT_ERROR_MALFORMED_RESPONSE);
                 MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                 return MQTT_ERROR_MALFORMED_RESPONSE;
