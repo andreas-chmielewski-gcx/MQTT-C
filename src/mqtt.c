@@ -250,6 +250,12 @@ static void __mqtt_io_cb(void *_client, size_t events) {
     struct mqtt_client *client = _client;
     enum MQTTErrors error;
 
+    if (events & MQTT_PAL_IO_ERROR) {
+        CROSSLOGE("socket error");
+        __mqtt_set_error(client, MQTT_ERROR_SOCKET_ERROR);
+        return;
+    }
+
     if (events & MQTT_PAL_IO_READ) {
         error = __mqtt_recv(client);
         if (error != MQTT_OK) {
