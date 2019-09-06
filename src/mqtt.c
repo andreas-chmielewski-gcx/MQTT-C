@@ -434,6 +434,7 @@ enum MQTTErrors mqtt_connect(struct mqtt_client *client,
                      const void* will_message,
                      size_t will_message_size,
                      const char* user_name,
+                     size_t user_name_size,
                      const char* password,
                      uint8_t connect_flags,
                      uint16_t keep_alive)
@@ -463,7 +464,7 @@ enum MQTTErrors mqtt_connect(struct mqtt_client *client,
         mqtt_pack_connection_request(
             client->mq.curr, client->mq.curr_sz,
             client_id, client_id_size, will_topic, will_message,
-            will_message_size,user_name, password, 
+            will_message_size, user_name, user_name_size, password,
             connect_flags, keep_alive
         ), 
         1
@@ -1393,6 +1394,7 @@ ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz,
                                      const void* will_message,
                                      size_t will_message_size,
                                      const char* user_name,
+                                     size_t user_name_size,
                                      const char* password,
                                      uint8_t connect_flags, 
                                      uint16_t keep_alive)
@@ -1446,7 +1448,7 @@ ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz,
     if (user_name != NULL) {
         /* a user name is present */
         connect_flags |= MQTT_CONNECT_USER_NAME;
-        remaining_length += __mqtt_packed_cstrlen(user_name);
+        remaining_length += __mqtt_packed_cstrlen_raw(user_name, user_name_size);
     } else {
         connect_flags &= ~MQTT_CONNECT_USER_NAME;
     }
@@ -1496,7 +1498,7 @@ ssize_t mqtt_pack_connection_request(uint8_t* buf, size_t bufsz,
         buf += will_message_size;
     }
     if (connect_flags & MQTT_CONNECT_USER_NAME) {
-        buf += __mqtt_pack_str(buf, user_name);
+        buf += __mqtt_pack_str_raw(buf, user_name, user_name_size);
     }
     if (connect_flags & MQTT_CONNECT_PASSWORD) {
         buf += __mqtt_pack_str(buf, password);
