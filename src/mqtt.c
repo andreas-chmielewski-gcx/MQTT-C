@@ -109,10 +109,51 @@ enum MQTTErrors mqtt_start_reconnect(struct mqtt_client *client) {
     return error;
 }
 
+void print_error(enum MQTTErrors error)
+{
+  if (error != MQTT_OK)
+    CROSSLOGD("Setting error code:");
+
+  switch(error) {
+    case MQTT_ERROR_NULLPTR: CROSSLOGD("MQTT_ERROR_NULLPTR"); break;
+    case MQTT_ERROR_CONTROL_FORBIDDEN_TYPE:CROSSLOGD("MQTT_ERROR_CONTROL_FORBIDDEN_TYPE"); break;
+    case MQTT_ERROR_CONTROL_INVALID_FLAGS:CROSSLOGD("MQTT_ERROR_CONTROL_INVALID_FLAGS"); break;
+    case MQTT_ERROR_CONTROL_WRONG_TYPE:CROSSLOGD("MQTT_ERROR_CONTROL_WRONG_TYPE"); break;
+    case MQTT_ERROR_CONNECT_NULL_CLIENT_ID:CROSSLOGD("MQTT_ERROR_CONNECT_NULL_CLIENT_ID"); break;
+    case MQTT_ERROR_CONNECT_NULL_WILL_MESSAGE:CROSSLOGD("MQTT_ERROR_CONNECT_NULL_WILL_MESSAGE"); break;
+    case MQTT_ERROR_CONNECT_FORBIDDEN_WILL_QOS:CROSSLOGD("MQTT_ERROR_CONNECT_FORBIDDEN_WILL_QOS"); break;
+    case MQTT_ERROR_CONNACK_FORBIDDEN_FLAGS:CROSSLOGD("MQTT_ERROR_CONNACK_FORBIDDEN_FLAGS"); break;
+    case MQTT_ERROR_CONNACK_FORBIDDEN_CODE:CROSSLOGD("MQTT_ERROR_CONNACK_FORBIDDEN_CODE"); break;
+    case MQTT_ERROR_PUBLISH_FORBIDDEN_QOS:CROSSLOGD("MQTT_ERROR_PUBLISH_FORBIDDEN_QOS"); break;
+    case MQTT_ERROR_SUBSCRIBE_TOO_MANY_TOPICS:CROSSLOGD("MQTT_ERROR_SUBSCRIBE_TOO_MANY_TOPICS"); break;
+    case MQTT_ERROR_MALFORMED_RESPONSE:CROSSLOGD("MQTT_ERROR_MALFORMED_RESPONSE"); break;
+    case MQTT_ERROR_UNSUBSCRIBE_TOO_MANY_TOPICS:CROSSLOGD("MQTT_ERROR_UNSUBSCRIBE_TOO_MANY_TOPICS"); break;
+    case MQTT_ERROR_RESPONSE_INVALID_CONTROL_TYPE:CROSSLOGD("MQTT_ERROR_RESPONSE_INVALID_CONTROL_TYPE"); break;
+    case MQTT_ERROR_CONNECT_NOT_CALLED:CROSSLOGD("MQTT_ERROR_CONNECT_NOT_CALLED"); break;
+    case MQTT_ERROR_SEND_BUFFER_IS_FULL:CROSSLOGD("MQTT_ERROR_SEND_BUFFER_IS_FULL"); break;
+    case MQTT_ERROR_SOCKET_ERROR:CROSSLOGD("MQTT_ERROR_SOCKET_ERROR"); break;
+    case MQTT_ERROR_MALFORMED_REQUEST:CROSSLOGD("MQTT_ERROR_MALFORMED_REQUEST"); break;
+    case MQTT_ERROR_RECV_BUFFER_TOO_SMALL:CROSSLOGD("MQTT_ERROR_RECV_BUFFER_TOO_SMALL"); break;
+    case MQTT_ERROR_ACK_OF_UNKNOWN:CROSSLOGD("MQTT_ERROR_ACK_OF_UNKNOWN"); break;
+    case MQTT_ERROR_NOT_IMPLEMENTED:CROSSLOGD("MQTT_ERROR_NOT_IMPLEMENTED"); break;
+    case MQTT_ERROR_CONNECTION_REFUSED:CROSSLOGD("MQTT_ERROR_CONNECTION_REFUSED"); break;
+    case MQTT_ERROR_SUBSCRIBE_FAILED:CROSSLOGD("MQTT_ERROR_SUBSCRIBE_FAILED"); break;
+    case MQTT_ERROR_CONNECTION_CLOSED:CROSSLOGE("MQTT_ERROR_CONNECTION_CLOSED"); break;
+    case MQTT_ERROR_INITIAL_RECONNECT:CROSSLOGD("MQTT_ERROR_INITIAL_RECONNECT"); break;
+    case MQTT_ERROR_INVALID_REMAINING_LENGTH:CROSSLOGD("MQTT_ERROR_INVALID_REMAINING_LENGTH"); break;
+    case MQTT_ERROR_IMPLEMENTATION_BUG:CROSSLOGD("MQTT_ERROR_IMPLEMENTATION_BUG"); break;
+    case MQTT_ERROR_INIT:CROSSLOGD("MQTT_ERROR_INIT"); break;
+    case MQTT_ERROR_FATAL:CROSSLOGD("MQTT_ERROR_FATAL"); break;
+    case MQTT_OK: CROSSLOGI("MQTT_OK"); break;
+    default:CROSSLOGD("Unknown mqtt error occurred"); break;
+  }
+}
+
 void __mqtt_set_error(struct mqtt_client *client, enum MQTTErrors error) {
     int rc;
 
     client->error = error;
+    print_error(error);
 
     if (error == MQTT_OK)
         return;
@@ -991,6 +1032,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
         */
         switch (response.fixed_header.control_type) {
             case MQTT_CONTROL_CONNACK:
+                CROSSLOGD("receiving MQTT_CONTROL_CONNACK");
                 /* release associated CONNECT */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_CONNECT, NULL);
                 if (msg == NULL) {
@@ -1011,6 +1053,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 }
                 break;
             case MQTT_CONTROL_PUBLISH:
+                CROSSLOGD("receiving MQTT_CONTROL_PUBLISH");
                 /* stage response, none if qos==0, PUBACK if qos==1, PUBREC if qos==2 */
                 if (response.decoded.publish.qos_level == 1) {
                     rv = __mqtt_puback(client, response.decoded.publish.packet_id);
@@ -1038,6 +1081,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->publish_response_callback(&client->publish_response_callback_state, &response.decoded.publish);
                 break;
             case MQTT_CONTROL_PUBACK:
+                CROSSLOGD("receiving MQTT_CONTROL_PUBACK");
                 /* release associated PUBLISH */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBLISH, &response.decoded.puback.packet_id);
                 if (msg == NULL) {
@@ -1051,6 +1095,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->typical_response_time = 0.875 * (client->typical_response_time) + 0.125 * (double) (MQTT_PAL_TIME() - msg->time_sent);
                 break;
             case MQTT_CONTROL_PUBREC:
+                CROSSLOGD("receiving MQTT_CONTROL_PUBREC");
                 /* check if this is a duplicate */
                 if (mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBREL, &response.decoded.pubrec.packet_id) != NULL) {
                     break;
@@ -1076,6 +1121,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 }
                 break;
             case MQTT_CONTROL_PUBREL:
+                CROSSLOGD("receiving MQTT_CONTROL_PUBREL");
                 /* release associated PUBREC */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBREC, &response.decoded.pubrel.packet_id);
                 if (msg == NULL) {
@@ -1097,6 +1143,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 }
                 break;
             case MQTT_CONTROL_PUBCOMP:
+                CROSSLOGD("receiving MQTT_CONTROL_PUBCOMP");
                 /* release associated PUBREL */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PUBREL, &response.decoded.pubcomp.packet_id);
                 if (msg == NULL) {
@@ -1110,6 +1157,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->typical_response_time = 0.875 * (client->typical_response_time) + 0.125 * (double) (MQTT_PAL_TIME() - msg->time_sent);
                 break;
             case MQTT_CONTROL_SUBACK:
+                CROSSLOGD("receiving MQTT_CONTROL_SUBACK");
                 /* release associated SUBSCRIBE */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_SUBSCRIBE, &response.decoded.suback.packet_id);
                 if (msg == NULL) {
@@ -1130,6 +1178,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 }
                 break;
             case MQTT_CONTROL_UNSUBACK:
+                CROSSLOGD("receiving MQTT_CONTROL_UNSUBACK");
                 /* release associated UNSUBSCRIBE */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_UNSUBSCRIBE, &response.decoded.unsuback.packet_id);
                 if (msg == NULL) {
@@ -1143,6 +1192,7 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                 client->typical_response_time = 0.875 * (client->typical_response_time) + 0.125 * (double) (MQTT_PAL_TIME() - msg->time_sent);
                 break;
             case MQTT_CONTROL_PINGRESP:
+                CROSSLOGD("receiving MQTT_CONTROL_PINGRESP");
                 /* release associated PINGREQ */
                 msg = mqtt_mq_find(&client->mq, MQTT_CONTROL_PINGREQ, NULL);
                 if (msg == NULL) {
