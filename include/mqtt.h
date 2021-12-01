@@ -1115,6 +1115,16 @@ struct mqtt_client {
      */
     enum MQTTErrors error;
 
+    /**
+     * @brief The timeout period in seconds a ping response is expected.
+     *
+     * If the broker doesn't return an PINGRESP within no_ping_timeout a timeout
+     * will occur and the connection will be restablished.
+     *
+     * @note The default value is 10.
+     */
+    int no_ping_timeout;
+
     /** 
      * @brief The timeout period in seconds.
      * 
@@ -1211,6 +1221,7 @@ struct mqtt_client {
     mqtt_pal_ev_t *ev;
     mqtt_pal_io_t io_sock;
     mqtt_pal_timer_t timer_ping;
+    mqtt_pal_timer_t timer_ping_resp;
     mqtt_pal_timer_t timer_ack;
 
     size_t reconnect_timeout;

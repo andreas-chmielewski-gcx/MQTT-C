@@ -35,6 +35,9 @@ static enum MQTTErrors __mqtt_try_reset_callbacks(struct mqtt_client *client) {
     rc = mqtt_pal_timer_set(&client->timer_ping, 0, 0);
     if (rc) err = MQTT_ERROR_INIT;
 
+    rc = mqtt_pal_timer_set(&client->timer_ping_resp, 0, 0);
+    if (rc) err = MQTT_ERROR_INIT;
+
     rc = mqtt_pal_timer_set(&client->timer_ack, 0, 0);
     if (rc) err = MQTT_ERROR_INIT;
 
@@ -315,11 +318,34 @@ static void __mqtt_io_cb(void *_client, size_t events) {
 static void __mqtt_ping_cb(void *_client) {
     struct mqtt_client *client = _client;
     enum MQTTErrors error;
+    int rc;
+
+    CROSSLOGD("Sending ping");
 
     error = mqtt_ping(client);
     if (error != MQTT_OK) {
+        CROSSLOGE("Ping failed");
+        __mqtt_fatal_error(client, MQTT_ERROR_ACK_OF_UNKNOWN);
         return;
     }
+
+    rc = mqtt_pal_timer_set(&client->timer_ping_resp, client->no_ping_timeout, 0);
+    if (rc) {
+        CROSSLOGE("Setting pingresp timer failed");
+        __mqtt_fatal_error(client, MQTT_ERROR_INIT);
+        return;
+    }
+
+    return;
+}
+
+static void __mqtt_ping_resp_cb(void *_client) {
+    struct mqtt_client *client = _client;
+
+    CROSSLOGE("No ping received");
+    __mqtt_fatal_error(client, MQTT_ERROR_UNKNOWN);
+
+    return;
 }
 
 static void __mqtt_ack_cb(void *_client) {
@@ -367,6 +393,7 @@ enum MQTTErrors mqtt_init_reconnect(struct mqtt_client *client, mqtt_pal_ev_t *e
     client->recv_buffer.curr_sz = 0;
 
     client->error = MQTT_ERROR_INITIAL_RECONNECT;
+    client->no_ping_timeout = 10;
     client->response_timeout = 30;
     client->number_of_timeouts = 0;
     client->number_of_keep_alives = 0;
@@ -384,6 +411,10 @@ enum MQTTErrors mqtt_init_reconnect(struct mqtt_client *client, mqtt_pal_ev_t *e
         return MQTT_ERROR_INIT;
 
     rc = mqtt_pal_timer_init(client->ev, &client->timer_ping, __mqtt_ping_cb, client);
+    if (rc)
+        return MQTT_ERROR_INIT;
+
+    rc = mqtt_pal_timer_init(client->ev, &client->timer_ping_resp, __mqtt_ping_resp_cb, client);
     if (rc)
         return MQTT_ERROR_INIT;
 
@@ -1201,6 +1232,15 @@ ssize_t __mqtt_recv(struct mqtt_client *client)
                     MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
                     return MQTT_ERROR_ACK_OF_UNKNOWN;
                 }
+
+                int rc = mqtt_pal_timer_set(&client->timer_ping_resp, 0, 0);
+                if (rc) {
+                    CROSSLOGE("pingresp timer failed");
+                    __mqtt_fatal_error(client, MQTT_ERROR_INIT);
+                    MQTT_PAL_MUTEX_UNLOCK(&client->mutex);
+                    return MQTT_ERROR_INIT;
+                }
+
                 msg->state = MQTT_QUEUED_COMPLETE;
                 /* update response time */
                 client->typical_response_time = 0.875 * (client->typical_response_time) + 0.125 * (double) (MQTT_PAL_TIME() - msg->time_sent);
