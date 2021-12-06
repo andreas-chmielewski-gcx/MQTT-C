@@ -167,8 +167,12 @@ void __mqtt_set_error(struct mqtt_client *client, enum MQTTErrors error) {
         return;
     }
 
+    if (client->on_error_reconnect_timeout < (60 * 3)) {
+        client->on_error_reconnect_timeout = client->on_error_reconnect_timeout * 2;
+    }
+
     /* do a reconnect after the usual waiting time */
-    rc = mqtt_pal_timer_set(&client->timer_reconnect, client->reconnect_timeout, 0);
+    rc = mqtt_pal_timer_set(&client->timer_reconnect, client->on_error_reconnect_timeout, 0);
     if (rc) {
         __mqtt_fatal_error(client, MQTT_ERROR_INIT);
         return;
@@ -403,6 +407,7 @@ enum MQTTErrors mqtt_init_reconnect(struct mqtt_client *client, mqtt_pal_ev_t *e
     client->reconnect_callback = reconnect;
     client->reconnect_state = reconnect_state;
     client->reconnect_timeout = 30;
+    client->on_error_reconnect_timeout = 1;
     client->fatal_error_callback = fatal_error_callback;
     client->ev = ev;
 
@@ -453,6 +458,8 @@ enum MQTTErrors mqtt_reinit(struct mqtt_client* client,
         __mqtt_fatal_error(client, MQTT_ERROR_INIT);
         return MQTT_ERROR_FATAL;
     }
+
+    client->on_error_reconnect_timeout = 1;
 
     return MQTT_OK;
 }

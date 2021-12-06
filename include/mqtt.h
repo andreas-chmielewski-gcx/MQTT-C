@@ -1224,8 +1224,12 @@ struct mqtt_client {
     mqtt_pal_timer_t timer_ping_resp;
     mqtt_pal_timer_t timer_ack;
 
+    /** @brief Time that a reconnect may take most. */
     size_t reconnect_timeout;
     mqtt_pal_timer_t timer_reconnect;
+
+    /** @brief Time that is waited between an error and a reconnect. */
+    size_t on_error_reconnect_timeout;
 
     void (*fatal_error_callback)(struct mqtt_client*);
 };
